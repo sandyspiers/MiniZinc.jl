@@ -124,13 +124,9 @@ optimize!(model)
 
 ### CP-SAT
 
-**`ORTools_jll` currently requires Linux**
-
-In order to use the CP-SAT solver from ORTools, use:
+The CP-SAT solver from OR-Tools is installed with MiniZinc.jl. To use it, do:
 ```julia
-import ORTools_jll
-path = joinpath(ORTools_jll.artifact_dir, "share", "minizinc", "solvers", "cp-sat.msc")
-model = Model(() -> MiniZinc.Optimizer{Float64}(path))
+model = Model(() -> MiniZinc.Optimizer{Int}("cp-sat"))
 ```
 
 ## MathOptInterface API
