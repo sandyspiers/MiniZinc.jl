@@ -1240,6 +1240,32 @@ function test_moi_tests()
     return
 end
 
+function test_cpsat_moi_tests()
+    model = MOI.Utilities.CachingOptimizer(
+        MOI.Utilities.Model{Int}(),
+        MiniZinc.Optimizer{Int}("cp-sat"),
+    )
+    config = MOI.Test.Config(Int)
+    MOI.Test.runtests(model, config, include = String["test_cpsat_"])
+    return
+end
+
+function test_cpsat_optimization()
+    model = MOI.Utilities.Model{Int}()
+    x, _ = MOI.add_constrained_variable(model, MOI.Integer())
+    MOI.add_constraint(model, x, MOI.Interval(1, 10))
+    MOI.set(model, MOI.ObjectiveFunction{MOI.VariableIndex}(), x)
+    MOI.set(model, MOI.ObjectiveSense(), MOI.MAX_SENSE)
+    solver = MiniZinc.Optimizer{Int}("cp-sat")
+    index_map, _ = MOI.optimize!(solver, model)
+    @test MOI.get(solver, MOI.TerminationStatus()) === MOI.OPTIMAL
+    @test MOI.get(solver, MOI.ResultCount()) >= 1
+    @test MOI.get(solver, MOI.VariablePrimal(), index_map[x]) == 10
+    @test MOI.get(solver, MOI.ObjectiveValue()) == 10
+    @test MOI.get(solver, MOI.RawStatusString()) == "OPTIMAL"
+    return
+end
+
 function test_moi_conflict_tests()
     model = MOI.Utilities.CachingOptimizer(
         MOI.Utilities.Model{Int}(),
