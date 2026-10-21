@@ -9,6 +9,7 @@ import Chuffed_jll
 import FindMUS_jll
 import MathOptInterface as MOI
 import MiniZinc_jll
+import ORTools_jll
 
 const ReifiedLessThan{T} = MOI.Reified{MOI.LessThan{T}}
 const ReifiedGreaterThan{T} = MOI.Reified{MOI.GreaterThan{T}}

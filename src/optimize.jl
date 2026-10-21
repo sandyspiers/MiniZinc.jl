@@ -12,6 +12,19 @@ function Chuffed()
     end
 end
 
+function CPSAT()
+    file = joinpath(
+        ORTools_jll.artifact_dir,
+        "share",
+        "minizinc",
+        "solvers",
+        "cp-sat.msc",
+    )
+    if isfile(file)
+        return file
+    end
+end
+
 function run_flatzinc(solver_cmd::F, filename, args = String[]) where {F}
     return read(`$(solver_cmd()) $(vcat(args, filename))`, String)
 end
@@ -40,6 +53,8 @@ mutable struct Optimizer{T} <: MOI.AbstractOptimizer
     function Optimizer{T}(solver::String) where {T}
         if solver == "chuffed"
             solver = Chuffed()
+        elseif solver == "cp-sat"
+            solver = CPSAT()
         end
         primal_solutions = Dict{MOI.VariableIndex,T}[]
         options =

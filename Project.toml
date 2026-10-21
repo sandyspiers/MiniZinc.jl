@@ -8,12 +8,14 @@ Chuffed_jll = "77125aae-c893-5498-99e3-e30470bfa328"
 FindMUS_jll = "c35e9feb-7830-5f19-b4d9-02e619c993ed"
 MathOptInterface = "b8f27783-ece8-5eb3-8dc8-9495eed66fee"
 MiniZinc_jll = "3677d96b-3d39-5184-a844-8e8b2839af35"
+ORTools_jll = "717719f8-c30c-5086-8f3c-70cd6a1e3a46"
 
 [compat]
 Chuffed_jll = "=0.10.4, =0.13.2, =0.14.0"
 FindMUS_jll = "=2.10.1"
 MathOptInterface = "1.43"
 MiniZinc_jll = "=2.10.1"
+ORTools_jll = "9.15"
 Test = "1"
 julia = "1.10"
 
