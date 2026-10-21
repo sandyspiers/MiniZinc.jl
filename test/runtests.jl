@@ -1712,10 +1712,125 @@ function test_chuffed_time_limit_with_solution()
     solver = MiniZinc.Optimizer{Int}("chuffed")
     MOI.set(solver, MOI.Silent(), true)
     MOI.set(solver, MOI.TimeLimitSec(), 1)
-    MOI.optimize!(solver, model)
+    index_map, _ = MOI.optimize!(solver, model)
     @test MOI.get(solver, MOI.PrimalStatus()) == MOI.FEASIBLE_POINT
     @test MOI.get(solver, MOI.TerminationStatus()) == MOI.TIME_LIMIT
     @test MOI.get(solver, MOI.RawStatusString()) == "SATISFIABLE"
+    # the objective of each result matches its own solution
+    for k in 1:MOI.get(solver, MOI.ResultCount())
+        y = [MOI.get(solver, MOI.VariablePrimal(k), index_map[xi]) for xi in x]
+        @test MOI.get(solver, MOI.ObjectiveValue(k)) == sum((2:2:60) .* y)
+    end
+    return
+end
+
+function test_chuffed_termination_status()
+    # two variables in 1..3,
+    # only 9 possible solutions
+    model = MOI.Utilities.Model{Int}()
+    x, _ = MOI.add_constrained_variables(model, fill(MOI.Interval(1, 3), 2))
+    MOI.add_constraint.(model, x, MOI.Integer())
+
+    # satisfaction stops after the first solution by default
+    solver = MiniZinc.Optimizer{Int}("chuffed")
+    MOI.optimize!(solver, model)
+    @test MOI.get(solver, MOI.TerminationStatus()) == MOI.OPTIMAL
+
+    # a solution limit above the number of solutions finds all of them (9)
+    solver = MiniZinc.Optimizer{Int}("chuffed")
+    MOI.set(solver, MOI.SolutionLimit(), 100)
+    MOI.optimize!(solver, model)
+    @test MOI.get(solver, MOI.TerminationStatus()) == MOI.OPTIMAL
+    @test MOI.get(solver, MOI.ResultCount()) == 9
+
+    # a solution limit below the number of solutions is reached
+    solver = MiniZinc.Optimizer{Int}("chuffed")
+    MOI.set(solver, MOI.SolutionLimit(), 2)
+    MOI.optimize!(solver, model)
+    @test MOI.get(solver, MOI.TerminationStatus()) == MOI.SOLUTION_LIMIT
+    @test MOI.get(solver, MOI.ResultCount()) == 2
+
+    # a solution limit reached before the time limit is still SOLUTION_LIMIT
+    solver = MiniZinc.Optimizer{Int}("chuffed")
+    MOI.set(solver, MOI.SolutionLimit(), 2)
+    MOI.set(solver, MOI.TimeLimitSec(), 10)
+    MOI.optimize!(solver, model)
+    @test MOI.get(solver, MOI.TerminationStatus()) == MOI.SOLUTION_LIMIT
+    @test MOI.get(solver, MOI.ResultCount()) == 2
+
+    # maximize x[1] + x[2]: solution limits are ignored for optimization
+    f = 1 * x[1] + x[2]
+    MOI.set(model, MOI.ObjectiveFunction{typeof(f)}(), f)
+    MOI.set(model, MOI.ObjectiveSense(), MOI.MAX_SENSE)
+    solver = MiniZinc.Optimizer{Int}("chuffed")
+    MOI.set(solver, MOI.SolutionLimit(), 1)
+    MOI.optimize!(solver, model)
+    @test MOI.get(solver, MOI.TerminationStatus()) == MOI.OPTIMAL
+    @test MOI.get(solver, MOI.ObjectiveValue()) == 6
+
+    # 8 variables in 1..10: 10^8 solutions, so the time limit is reached
+    # before the solution limit
+    model = MOI.Utilities.Model{Int}()
+    x, _ = MOI.add_constrained_variables(model, fill(MOI.Interval(1, 10), 8))
+    MOI.add_constraint.(model, x, MOI.Integer())
+    solver = MiniZinc.Optimizer{Int}("chuffed")
+    MOI.set(solver, MOI.Silent(), true)
+    MOI.set(solver, MOI.SolutionLimit(), 10^9)
+    MOI.set(solver, MOI.TimeLimitSec(), 1)
+    MOI.optimize!(solver, model)
+    @test MOI.get(solver, MOI.TerminationStatus()) == MOI.TIME_LIMIT
+    @test MOI.get(solver, MOI.PrimalStatus()) == MOI.FEASIBLE_POINT
+
+    # knapsack with even weights and an odd capacity: a solution is found
+    # quickly, but optimality is not proven within the time limit, even with
+    # a solution limit
+    model = MOI.Utilities.Model{Int}()
+    x, _ = MOI.add_constrained_variables(model, fill(MOI.ZeroOne(), 30))
+    f = MOI.ScalarAffineFunction(MOI.ScalarAffineTerm.(2:2:60, x), 0)
+    MOI.add_constraint(model, f, MOI.LessThan(451))
+    MOI.set(model, MOI.ObjectiveFunction{typeof(f)}(), f)
+    MOI.set(model, MOI.ObjectiveSense(), MOI.MAX_SENSE)
+    solver = MiniZinc.Optimizer{Int}("chuffed")
+    MOI.set(solver, MOI.SolutionLimit(), 1)
+    MOI.set(solver, MOI.TimeLimitSec(), 1)
+    MOI.optimize!(solver, model)
+    @test MOI.get(solver, MOI.TerminationStatus()) == MOI.TIME_LIMIT
+    @test MOI.get(solver, MOI.PrimalStatus()) == MOI.FEASIBLE_POINT
+    return
+end
+
+function test_chuffed_solution_limit_optimization()
+    # `--num-solutions` does not limit the improving solutions printed by `-i`,
+    # so more results than the limit is not SOLUTION_LIMIT. 6-mark Golomb ruler,
+    # optimal length 17.
+    n = 6
+    model = MOI.Utilities.Model{Int}()
+    mark = [MOI.add_constrained_variable(model, MOI.Integer())[1] for _ in 1:n]
+    MOI.add_constraint(model, mark[1], MOI.EqualTo(0))
+    MOI.add_constraint.(model, mark[2:n], MOI.Interval(1, n^2))
+    for i in 1:(n-1)
+        MOI.add_constraint(model, 1 * mark[i+1] - mark[i], MOI.GreaterThan(1))
+    end
+    pairs = [(i, j) for i in 1:n for j in (i+1):n]
+    diff =
+        [MOI.add_constrained_variable(model, MOI.Integer())[1] for _ in pairs]
+    MOI.add_constraint.(model, diff, MOI.Interval(1, n^2))
+    for (k, (i, j)) in enumerate(pairs)
+        f = 1 * diff[k] - mark[j] + mark[i]
+        MOI.add_constraint(model, f, MOI.EqualTo(0))
+    end
+    f = MOI.VectorOfVariables(diff)
+    MOI.add_constraint(model, f, MOI.AllDifferent(length(diff)))
+    MOI.set(model, MOI.ObjectiveFunction{typeof(mark[n])}(), mark[n])
+    MOI.set(model, MOI.ObjectiveSense(), MOI.MIN_SENSE)
+    solver = MiniZinc.Optimizer{Int}("chuffed")
+    MOI.set(solver, MOI.Silent(), true)
+    MOI.set(solver, MOI.SolutionLimit(), 1)
+    index_map, _ = MOI.optimize!(solver, model)
+    @test MOI.get(solver, MOI.ResultCount()) > 1
+    @test MOI.get(solver, MOI.TerminationStatus()) == MOI.OPTIMAL
+    @test MOI.get(solver, MOI.ObjectiveValue()) == 17
+    @test MOI.get(solver, MOI.VariablePrimal(), index_map[mark[n]]) == 17
     return
 end
 
@@ -2220,8 +2335,17 @@ function test_example_packing()
     MOI.optimize!(model)
     @test MOI.get(model, MOI.TerminationStatus()) === MOI.OPTIMAL
     @test MOI.get(model, MOI.PrimalStatus()) === MOI.FEASIBLE_POINT
-    @test MOI.get(model, MOI.ResultCount()) == 1
     @test MOI.get(model, MOI.ObjectiveValue()) == 120
+    # `-i` returns every improving solution, ordered from best to worst
+    n_results = MOI.get(model, MOI.ResultCount())
+    @test n_results > 1
+    objectives = [MOI.get(model, MOI.ObjectiveValue(k)) for k in 1:n_results]
+    @test issorted(objectives)
+    for k in 1:n_results
+        mx = MOI.get(model, MOI.VariablePrimal(k), max_x)
+        my = MOI.get(model, MOI.VariablePrimal(k), max_y)
+        @test objectives[k] == mx * my
+    end
     rm("test_packing.mzn")
     return
 end
