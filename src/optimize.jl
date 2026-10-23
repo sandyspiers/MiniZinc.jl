@@ -57,8 +57,11 @@ mutable struct Optimizer{T} <: MOI.AbstractOptimizer
             solver = CPSAT()
         end
         primal_solutions = Dict{MOI.VariableIndex,T}[]
-        options =
-            Dict{String,Any}("model_filename" => "", "num_solutions" => nothing)
+        options = Dict{String,Any}(
+            "model_filename" => "",
+            "num_solutions" => nothing,
+            "all_solutions" => false,
+        )
         return new(
             solver,
             Model{T}(),
@@ -115,13 +118,9 @@ function _run_minizinc(dest::Optimizer)
             if dest.options["num_solutions"] !== nothing
                 cmd = `$cmd --num-solutions $(dest.options["num_solutions"])`
             end
-            # Some solvers (CP-SAT) dont support a time limit flag.
-            # Therefore, minizinc just terminates them whenever they exceed
-            # the timelimit. If we dont add `-i`, then CP-SAT only prints
-            # the final, optimal solution, which gets completely lost if minizinc
-            # killed it early. A side effect of adding `-i` is that we now
-            # save and report every intermediate solution.
-            cmd = `$cmd -i`
+            if dest.options["all_solutions"]
+                cmd = `$cmd -a`
+            end
             if !dest.silent
                 cmd = `$cmd --verbose-solving`
             end
@@ -189,6 +188,9 @@ function MOI.set(model::Optimizer, attr::MOI.RawOptimizerAttribute, value)
     if attr.name == "num_solutions"
         MOI.set(model, MOI.SolutionLimit(), value)
         return
+    elseif attr.name == "all_solutions"
+        MOI.set(model, AllSolutions(), value)
+        return
     end
     model.options[attr.name] = value
     return
@@ -210,6 +212,29 @@ function MOI.set(
         throw(MOI.SetAttributeNotAllowed(attr, msg))
     end
     model.options["num_solutions"] = value
+    return
+end
+
+"""
+    AllSolutions() <: MOI.AbstractOptimizerAttribute
+
+An optimizer attribute to report all solutions found by the solver. Maps to
+the `-a` flag in MiniZinc. This is `false` by default.
+
+When `true`, satisfaction problems report and solve for every solution (up to
+[`MOI.SolutionLimit`](@ref)) and optimization problems report every improving
+solution.
+"""
+struct AllSolutions <: MOI.AbstractOptimizerAttribute end
+
+MOI.supports(::Optimizer, ::AllSolutions) = true
+
+function MOI.get(model::Optimizer, ::AllSolutions)
+    return MOI.get(model, MOI.RawOptimizerAttribute("all_solutions"))
+end
+
+function MOI.set(model::Optimizer, ::AllSolutions, value::Bool)
+    model.options["all_solutions"] = value
     return
 end
 
@@ -353,12 +378,16 @@ function MOI.get(model::Optimizer, ::MOI.TerminationStatus)
         if model.solver_status == "OPTIMAL"
             # completed the search
             return MOI.OPTIMAL
-        elseif sense == MOI.FEASIBILITY_SENSE && num_solutions == 0
+        elseif (
+            sense == MOI.FEASIBILITY_SENSE &&
+            num_solutions == 0 &&
+            !model.options["all_solutions"]
+        )
             # no solution limit, so stopped after the first solution
             return MOI.OPTIMAL
         elseif (
             sense == MOI.FEASIBILITY_SENSE &&
-            num_solutions <= length(model.primal_solutions)
+            0 < num_solutions <= length(model.primal_solutions)
         )
             # solution limits are only enforced for satisfaction problems
             return MOI.SOLUTION_LIMIT
